@@ -2,7 +2,7 @@
 "use strict";
 
 var bot = window.bot = {
-	invocationPattern : '!!',
+	invocationPattern : '',
 
 	commands : {}, //will be filled as needed
 	commandDictionary : null, //it's null at this point, won't be for long
