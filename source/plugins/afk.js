@@ -153,7 +153,6 @@ var commandHandler = function ( msg ) {
 	}
 
 	bot.memory.save( 'afk' );
-	msg.directreply( reply );
 };
 
 bot.addCommand({
@@ -163,7 +162,8 @@ bot.addCommand({
 		del: 'NONE'
 	},
 	description : 'Set an afk message: `/afk <message>`. Invoke `/afk` ' +
-		'again to return.'
+		'again to return.',
+	unTellable : true
 });
 
 IO.register( 'input', function afkInputListener ( msgObj ) {

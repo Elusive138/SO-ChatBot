@@ -11,7 +11,7 @@ var bot = window.bot = {
 		invoked   : 0,
 		learned   : 0,
 		forgotten : 0,
-		start     : new Date
+		start     : new Date()
 	},
 	users : {}, //will be filled in build
 
@@ -159,6 +159,8 @@ var bot = window.bot = {
 		return (
 			//make sure we don't process our own messages,
 			msgObj.user_id !== bot.adapter.user_id &&
+			//make sure we don't process Feeds
+			msgObj.user_id > 0 &&
 			//and the message begins with the invocationPattern
 			msg.startsWith( this.invocationPattern ) );
 	},
@@ -223,7 +225,7 @@ var bot = window.bot = {
 	},
 
 	callListeners : function ( msg ) {
-		return this.listeners.some(function callListener ( listener ) {
+		function callListener ( listener ) {
 			var match = msg.exec( listener.pattern ), resp;
 
 			if ( match ) {
@@ -235,7 +237,9 @@ var bot = window.bot = {
 				}
 				return resp !== false;
 			}
-		});
+		}
+
+		return this.listeners.some( callListener );
 	},
 
 	stoplog : false,
@@ -328,12 +332,14 @@ bot.banlist.add = function ( id ) {
 bot.banlist.remove = function ( id ) {
 	if ( this.contains(id) ) {
 		delete this[ id ];
+		bot.memory.save( 'ban' );
 	}
 };
 
 //some sort of pseudo constructor
 bot.Command = function ( cmd ) {
 	cmd.name = cmd.name.toLowerCase();
+	cmd.thisArg = cmd.thisArg || cmd;
 
 	cmd.permissions = cmd.permissions || {};
 	cmd.permissions.use = cmd.permissions.use || 'ALL';
@@ -346,6 +352,7 @@ bot.Command = function ( cmd ) {
 	//make canUse and canDel
 	[ 'Use', 'Del' ].forEach(function ( perm ) {
 		var low = perm.toLowerCase();
+
 		cmd[ 'can' + perm ] = function ( usrid ) {
 			var canDo = this.permissions[ low ];
 
@@ -364,6 +371,7 @@ bot.Command = function ( cmd ) {
 
 	cmd.exec = function () {
 		this.invoked += 1;
+
 		return this.fun.apply( this.thisArg, arguments );
 	};
 
@@ -375,12 +383,14 @@ bot.Command = function ( cmd ) {
 
 	return cmd;
 };
+
 //a normally priviliged command which can be executed if enough people use it
 bot.CommunityCommand = function ( command, req ) {
 	var cmd = this.Command( command ),
 		used = {},
 		old_execute = cmd.exec,
 		old_canUse  = cmd.canUse;
+
 	req = req || 2;
 
 	cmd.canUse = function () {
@@ -392,8 +402,12 @@ bot.CommunityCommand = function ( command, req ) {
 			bot.log( err );
 			return err;
 		}
+
+		used = {};
+
 		return old_execute.apply( cmd, arguments );
 	};
+
 	return cmd;
 
 	//once again, a switched return statement: truthy means a message, falsy
@@ -405,22 +419,26 @@ bot.CommunityCommand = function ( command, req ) {
 
 		clean();
 		var count = Object.keys( used ).length,
-			needed = req - count - 1; //0 based indexing vs. 1 based humans
+			needed = req - count;
 		bot.log( used, count, req );
 
 		if ( usrid in used ) {
 			return 'Already registered; still need {0} more'.supplant( needed );
 		}
-		else if ( needed > 0 ) {
-			used[ usrid ] = new Date;
-			return 'Registered; need {0} more to execute'.supplant( needed-1 );
+
+		used[ usrid ] = new Date();
+		needed -= 1;
+
+		if ( needed > 0 ) {
+			return 'Registered; need {0} more to execute'.supplant( needed );
 		}
+
 		bot.log( 'should execute' );
 		return false; //huzzah!
 	}
 
 	function clean () {
-		var tenMinsAgo = new Date;
+		var tenMinsAgo = new Date();
 		tenMinsAgo.setMinutes( tenMinsAgo.getMinutes() - 10 );
 
 		Object.keys( used ).reduce( rm, used );
@@ -459,16 +477,19 @@ bot.Message = function ( text, msgObj ) {
 		//parse( msgToParse ) parses msgToParse
 		//parse( msgToParse, true ) combination of the above
 		parse : function ( msg, map ) {
-			if ( !!msg === msg ) {
+			// parse( true )
+			if ( Boolean(msg) === msg ) {
 				map = msg;
 				msg = text;
 			}
 			var parsed = bot.parseCommandArgs( msg || text );
 
+			// parse( msgToParse )
 			if ( !map ) {
 				return parsed;
 			}
 
+			// parse( msgToParse, true )
 			return parsed.map(function ( part ) {
 				return bot.Message( part, msgObj );
 			});
@@ -477,45 +498,13 @@ bot.Message = function ( text, msgObj ) {
 		//execute a regexp against the text, saving it inside the object
 		exec : function ( regexp ) {
 			var match = regexp.exec( text );
-			this.matches = match ? match : [];
+			this.matches = match || [];
 
 			return match;
 		},
 
-		findUserid : function ( username ) {
-			username = username.toLowerCase().replace( /\s/g, '' );
-			var ids = Object.keys( bot.users );
-
-			return ids.first(function ( id ) {
-				var name = bot.users[ id ].name
-					.toLowerCase().replace( /\s/g, '' );
-
-				return name === username;
-			}) || -1;
-		}.memoize(),
-
-		findUsername : (function () {
-			var cache = {};
-
-			return function ( id, cb ) {
-				if ( cache[id] ) {
-					finish( cache[id] );
-				}
-				else if ( bot.users[id] ) {
-					finish( bot.users[id].name );
-				}
-				else {
-					bot.users.request( bot.adapter.roomid, id, reqFinish );
-				}
-
-				function reqFinish ( user ) {
-					finish( user.name );
-				}
-				function finish ( name ) {
-					cb( cache[id] = name );
-				}
-			};
-		})(),
+		findUserId   : bot.users.findUserId,
+		findUsername : bot.users.findUsername,
 
 		codify : bot.adapter.codify.bind( bot.adapter ),
 		escape : bot.adapter.escape.bind( bot.adapter ),
@@ -548,14 +537,6 @@ bot.isOwner = function ( usrid ) {
 };
 
 IO.register( 'input', bot.parseMessage, bot );
-
-bot.beatInterval = 5000; //once every 5 seconds is Good Enough ™
-(function beat () {
-	bot.beat = setTimeout(function () {
-		IO.fire( 'heartbeat' );
-		beat();
-	}, bot.beatInterval );
-}());
 
 //#build eval.js
 

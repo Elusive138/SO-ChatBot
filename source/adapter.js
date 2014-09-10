@@ -120,30 +120,45 @@ var linkTemplate = '[{text}]({url})';
 
 bot.adapter = {
 	//the following two only used in the adapter; you can change & drop at will
-	roomid : null,
-	fkey   : null,
+	roomid  : null,
+	fkey    : null,
 	//used in commands calling the SO API
-	site   : null,
+	site    : null,
 	//our user id
 	user_id : null,
+
+	maxLineLength : 500,
 
 	//not a necessary function, used in here to set some variables
 	init : function () {
 		var fkey = document.getElementById( 'fkey' );
-		//produces http://chat.stackexchange.com/?tab=site&host=superuser.com
-		var pathToHostSite = document.getElementById('siterooms').href;
 		if ( !fkey ) {
 			console.error( 'bot.adapter could not find fkey; aborting' );
 			return;
 		}
-		this.fkey = fkey.value;
-		this.roomid = Number( /\d+/.exec(location)[0] );
-		//gets the end of the pathToHostSite var (everything after 2nd equals)
-		this.site = /[a-z]*\.com$/.exec(pathToHostSite)[0];
+
+		this.fkey    = fkey.value;
+		this.roomid  = Number( /\d+/.exec(location)[0] );
+		this.site    = this.getCurrentSite();
 		this.user_id = CHAT.user.current().id;
 
 		this.in.init();
 		this.out.init();
+	},
+
+	getCurrentSite : function () {
+		var site = /chat\.(\w+)/.exec( location )[ 1 ];
+
+		if ( site !== 'stackexchange' ) {
+			return site;
+		}
+
+		var siteRoomsLink = document.getElementById( 'siterooms' ).href;
+
+		// #170. thanks to @patricknc4pk for the original fix.
+		site = /host=(.+?)\./.exec( siteRoomsLink )[ 1 ];
+
+		return site;
 	},
 
 	//a pretty crucial function. accepts the msgObj we know nothing about,
@@ -461,6 +476,7 @@ var output = bot.adapter.out = {
 	'409' : 0, //count the number of conflicts
 	total : 0, //number of messages sent
 	interval : polling.interval + 500,
+	flushWait : 500,
 
 	init : function () {},
 
@@ -481,10 +497,15 @@ var output = bot.adapter.out = {
 		//unless the bot's stopped. in which case, it should shut the fudge up
 		// the freezer and never let it out. not until it can talk again. what
 		// was I intending to say?
-		if ( !bot.stopped ) {
+		if ( bot.stopped ) {
 			//ah fuck it
-			this.sendToRoom( obj.text, obj.room );
+			return;
 		}
+
+		// #152, wait a bit before sending output.
+		setTimeout(function () {
+			output.sendToRoom( obj.text, obj.room );
+		}, this.flushWait );
 	},
 
 	//what's brown and sticky?

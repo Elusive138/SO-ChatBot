@@ -38,25 +38,9 @@ var commands = {
 		return commands.eval( arg, cb );
 	},
 
-	live : function () {
-		if ( !bot.stopped ) {
-			return 'I\'m not dead! Honest!';
-		}
-		bot.continue();
-		return 'And on this day, you shall paint eggs for a giant bunny.';
-	},
-
-	die : function () {
-		if ( bot.stopped ) {
-			return 'Kill me once, shame on you, kill me twice...';
-		}
-		bot.stop();
-		return 'You killed me!';
-	},
-
 	refresh : function() {
 		window.location.reload();
-    },
+	},
 
 	forget : function ( args ) {
 		var name = args.toLowerCase(),
@@ -72,77 +56,6 @@ var commands = {
 
 		cmd.del();
 		return 'Command ' + name + ' forgotten.';
-	},
-
-	ban : function ( args ) {
-		var ret = [];
-		if ( args.content ) {
-			args.parse().forEach( ban );
-		}
-		else {
-			ret = Object.keys( bot.banlist ).filter( Number ).map( format );
-		}
-
-		return ret.join( ' ' ) || 'Nothing to show/do.';
-
-		function ban ( usrid ) {
-			var id = Number( usrid ),
-				msg;
-			if ( isNaN(id) ) {
-				id = args.findUserid( usrid.replace(/^@/, '') );
-			}
-
-			if ( id < 0 ) {
-				msg = 'Cannot find user {0}.';
-			}
-			else if ( bot.isOwner(id) ) {
-				msg = 'Cannot mindjail owner {0}.';
-			}
-			else if ( bot.banlist.contains(id) ) {
-				msg = 'User {0} already in mindjail.';
-			}
-			else {
-				bot.banlist.add( id );
-				msg = 'User {0} added to mindjail.';
-			}
-
-			ret.push( msg.supplant(usrid) );
-		}
-
-		function format ( id ) {
-			var user = bot.users[ id ],
-				name = user ? user.name : '?';
-
-			return '{0} ({1})'.supplant( id, name );
-		}
-	},
-
-	unban : function ( args ) {
-		var ret = [];
-		args.parse().forEach( unban );
-
-		return ret.join( ' ' );
-
-		function unban ( usrid ) {
-			var id = Number( usrid ),
-				msg;
-			if ( isNaN(id) ) {
-				id = args.findUserid( usrid.replace(/^@/, '') );
-			}
-
-			if ( id < 0 ) {
-				msg = 'Cannot find user {0}.';
-			}
-			else if ( !bot.banlist.contains(id) ) {
-				msg = 'User {0} isn\'t in mindjail.';
-			}
-			else {
-				bot.banlist.remove( id );
-				msg = 'User {0} freed from mindjail!';
-			}
-
-			ret.push( msg.supplant(usrid) );
-		}
 	},
 
 	//a lesson on semi-bad practices and laziness
@@ -206,27 +119,6 @@ var commands = {
 
 			return ret.join( ', ' ) || 'haven\'t done anything yet!';
 		}
-	},
-
-	choose : function ( args ) {
-		return 'Deprecated command - use the weasel (should I ... or ...)';
-	},
-
-	user : function ( args ) {
-		var props = args.parse(),
-			usrid = props[ 0 ] || args.get( 'user_id' ),
-			id = usrid;
-
-		//check for searching by username
-		if ( !(/^\d+$/.test(usrid)) ) {
-			id = args.findUserid( usrid );
-
-			if ( id < 0 ) {
-				return 'Can\'t find user ' + usrid + ' in this chatroom.';
-			}
-		}
-
-		args.directreply( 'http://stackoverflow.com/users/' + id );
 	}
 };
 
@@ -262,34 +154,15 @@ return function ( args ) {
 		maxSize = 498 - user_name.length,
 		//TODO: only call this when commands were learned/forgotten since last
 		partitioned = partition( commands, maxSize );
-    
-    var lines = [];
-    for (var i = 0; i < partitioned.length; i++) {
-        lines.push(partitioned[i].join(', '));
-    }
-    var ret = lines.join('\n');
 
-	return ret;
+	return partitioned.invoke( 'join', ', ' ).join( '\n' );
 };
 })();
 
 commands.eval.async = commands.coffee.async = true;
 
-commands.parse = function ( args ) {
-	var msgObj = args.get(),
-		user = bot.users[ args.get('user_id') ],
-
-	    extraVars = Object.merge( msgObj, user );
-	bot.log( args, extraVars, '/parse input' );
-
-	return bot.parseMacro( args.toString(), extraVars );
-};
-
-commands.tell = (function () {
-var invalidCommands = { tell : true, forget : true };
-
-return function ( args ) {
-	var parts = args.split( ' ');
+commands.tell = function ( args ) {
+	var parts = args.split( ' ' );
 	bot.log( args.valueOf(), parts, '/tell input' );
 
 	var replyTo = parts[ 0 ],
@@ -303,11 +176,12 @@ return function ( args ) {
 	cmdName = cmdName.toLowerCase();
 	cmd = bot.getCommand( cmdName );
 	if ( cmd.error ) {
-		return cmd.error;
+		return cmd.error +
+			' (note that /tell works on commands, it\'s not an echo.)';
 	}
 
-	if ( invalidCommands.hasOwnProperty(cmdName) ) {
-		return 'Command ' + cmdName + ' cannot be used in /tell.';
+	if ( cmd.unTellable ) {
+		return 'Command ' + cmdName + ' cannot be used in `/tell`.';
 	}
 
 	if ( !cmd.canUse(args.get('user_id')) ) {
@@ -330,14 +204,12 @@ return function ( args ) {
 		extended.user_name = replyTo;
 	}
 
-	var msgObj = Object.merge( args.get(), extended );
-	var cmdArgs = bot.Message(
-		parts.slice( 2 ).join( ' ' ),
-		msgObj );
+	var msgObj = Object.merge( args.get(), extended ),
+		cmdArgs = bot.Message( parts.slice(2).join(' '), msgObj );
 
-	//this is an ugly, but functional thing, much like your high-school prom date
-	//to make sure a command's output goes through us, we simply override the
-	// standard ways to do output
+	//this is an ugly, but functional thing, much like your high-school prom
+	// date to make sure a command's output goes through us, we simply override
+	// the standard ways to do output
 	var reply = cmdArgs.reply.bind( cmdArgs ),
 		directreply = cmdArgs.directreply.bind( cmdArgs );
 
@@ -366,13 +238,8 @@ return function ( args ) {
 		}
 	}
 };
-}());
 
 var descriptions = {
-	ban : 'Bans user(s) from using me. Lacking arguments, prints the banlist.' +
-		' `/ban [usr_id|usr_name, [...]]`',
-	choose : '(Deprecated)',
-	die  : 'Kills me :(',
 	eval : 'Forwards message to javascript code-eval',
 	coffee : 'Forwards message to coffeescript code-eval',
 	forget : 'Forgets a given command. `/forget cmdName`',
@@ -380,16 +247,11 @@ var descriptions = {
 		' `/help [cmdName]`',
 	info : 'Grabs some stats on my current instance or a command.' +
 		' `/info [cmdName]`',
-	listcommands : 'Lists commands. `/listcommands [page=1]`',
+	listcommands : 'Lists commands. `/listcommands`',
 	listen : 'Forwards the message to my ears (as if called without the /)',
-	live : 'Resurrects me (:D) if I\'m down (D:)',
-	parse : 'Returns result of "parsing" message according to the my mini' +
-		'-macro capabilities (see online docs)',
 	refresh : 'Reloads the browser window I live in',
 	tell : 'Redirect command result to user/message.' +
-		' /tell `msg_id|usr_name cmdName [cmdArgs]`',
-	unban : 'Removes a user from my mindjail. `/unban usr_id|usr_name`',
-	user : 'Fetches user-link for specified user. `/user usr_id|usr_name`',
+		' /tell `msg_id|usr_name cmdName [cmdArgs]`'
 };
 
 //only allow owners to use certain commands
@@ -402,6 +264,10 @@ var privilegedCommands = {
 var communal = {
 	die : true, ban : true
 };
+//commands which can't be used with /tell
+var unTellable = {
+	tell : true, forget : true
+};
 
 Object.iterate( commands, function ( cmdName, fun ) {
 	var cmd = {
@@ -412,6 +278,7 @@ Object.iterate( commands, function ( cmdName, fun ) {
 			use : privilegedCommands[ cmdName ] ? 'OWNER' : 'ALL'
 		},
 		description : descriptions[ cmdName ],
+		unTellable : unTellable[ cmdName ],
 		async : commands[ cmdName ].async
 	};
 
